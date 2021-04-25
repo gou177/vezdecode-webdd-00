@@ -10,7 +10,7 @@ export const App = () => {
     <Router>
       <Header/>
       <Switch>
-        <Route path="/form">
+        <Route path="/sendform">
           <Form/>
         </Route>
         <Route path="/admin">
