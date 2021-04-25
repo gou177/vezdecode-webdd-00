@@ -9,8 +9,18 @@ from enum import Enum
 from itertools import count
 import json
 from threading import RLock
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class WorkerRole(str, Enum):
@@ -53,11 +63,11 @@ class ReportStatus(str, Enum):
 
 
 class Form(BaseModel):
-    text: str = Field(min_length=10)
+    text: str
     phone: int
-    first_name: str = Field(min_length=2)
-    last_name: str = Field(min_length=2)
-    patronymic_name: Optional[str] = Field(min_length=2)
+    first_name: str
+    last_name: str
+    patronymic_name: Optional[str]
     id: int = Field(default_factory=lambda: next(s.id_gen))
     created_at: int = Field(default_factory=time.time)
     closed_at: Optional[int] = None
@@ -88,10 +98,11 @@ s = Storage()
 def create_report(form: Form):
     s.data.append(form)
     s.save()
+    return {"success": True}
 
 
-@app.post("/isvalid")
-def getUser(login: str):
+@app.post("/user")
+def get_user(login: str):
     for worker in workers:
         if worker.login == login:
             return worker
@@ -107,35 +118,20 @@ def get_form(form_id: int):
 
 
 @app.put("/form/{form_id}/assign")
-def assign(form_id: int, worker_login: str, user: Worker = Depends(getUser)):  # type: ignore
+def assign(form_id: int, worker_login: str, user: Worker = Depends(get_user)):  # type: ignore
     if user.role != WorkerRole.ADMIN:
         raise HTTPException(403, "User not admin")
-    worker = getUser(login=worker_login)
+    worker = get_user(login=worker_login)
     form = get_form(form_id)
     form.worker = worker
+    form.status = ReportStatus.IN_WORK
     s.save()
     return form
 
 
 @app.get("/forms")
-def get_forms(
-    limit: int = 25,
-    skip: int = 0,
-    user: Worker = Depends(getUser),  # type: ignore
-    only_my: bool = False,
-    before: float = Depends(lambda: time.time(), use_cache=False),  # type: ignore
-    after: float = 0,
-):
-    only_my = only_my if user.role == WorkerRole.ADMIN else True
-    return list(
-        filter(
-            lambda x: after < x.created_at < before,
-            filter(
-                lambda x: x.worker == user or only_my == False,
-                s.data,
-            ),
-        )
-    )[skip : skip + limit]
+def get_forms():
+    return s.data
 
 
 @app.put("/form/setStatus")
@@ -145,5 +141,5 @@ def set_form_status(form_id: int, status: ReportStatus):
             form.status = status
             return s.save()
 
-
+app.mount("/", StaticFiles(directory="./static"))
 uvicorn.run(app, host="0.0.0.0", port=6403)
